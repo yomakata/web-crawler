@@ -104,7 +104,13 @@ const ResultsModal = ({ isOpen, onClose, jobId, results }) => {
                             <span>📝 {result.statistics.word_count} words</span>
                           )}
                           {result.statistics.image_count > 0 && (
-                            <span>🖼️ {result.statistics.image_count} images</span>
+                            <span>
+                              {result.metadata?.images?.successful > 0 ? (
+                                `🖼️ ${result.metadata.images.successful}/${result.statistics.image_count} images`
+                              ) : (
+                                `⚠️ ${result.statistics.image_count} images (failed)`
+                              )}
+                            </span>
                           )}
                         </div>
                       )}
@@ -114,13 +120,14 @@ const ResultsModal = ({ isOpen, onClose, jobId, results }) => {
                       {result.status === 'success' && result.output_folder && (
                         <button
                           onClick={() => {
-                            const folder = result.output_folder.split(/[/\\]/).pop();
-                            window.open(`http://localhost:5000/api/download/${jobId}/${folder}`, '_blank');
+                            // Extract folder name from path and download as ZIP
+                            const folderName = result.output_folder.split(/[/\\]/).pop();
+                            window.open(`http://localhost:5000/api/download/${jobId}/${folderName}/zip`, '_blank');
                           }}
                           className="flex items-center space-x-2 px-3 py-1.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-xs font-medium whitespace-nowrap"
                         >
                           <FiDownload className="h-4 w-4" />
-                          <span>Download</span>
+                          <span>Download ZIP</span>
                         </button>
                       )}
                       
@@ -362,10 +369,27 @@ const ResultsModal = ({ isOpen, onClose, jobId, results }) => {
               </div>
             )}
             {stats.image_count !== undefined && (
-              <div className="bg-success-50 rounded-lg p-4 border border-success-200">
-                <FiImage className="h-8 w-8 text-success-600 mb-2" />
-                <p className="text-2xl font-bold text-gray-900">{stats.image_count || 0}</p>
-                <p className="text-sm text-gray-600">Images</p>
+              <div className={`rounded-lg p-4 border ${
+                images.successfully_downloaded > 0
+                  ? 'bg-success-50 border-success-200'
+                  : images.total_found > 0
+                  ? 'bg-warning-50 border-warning-200'
+                  : 'bg-gray-50 border-gray-200'
+              }`}>
+                <FiImage className={`h-8 w-8 mb-2 ${
+                  images.successfully_downloaded > 0
+                    ? 'text-success-600'
+                    : images.total_found > 0
+                    ? 'text-warning-600'
+                    : 'text-gray-400'
+                }`} />
+                <p className="text-2xl font-bold text-gray-900">
+                  {images.successfully_downloaded || 0}
+                  {images.total_found > 0 && `/${images.total_found}`}
+                </p>
+                <p className="text-sm text-gray-600">
+                  {images.successfully_downloaded > 0 ? 'Images Downloaded' : images.total_found > 0 ? 'Images (Failed)' : 'Images'}
+                </p>
               </div>
             )}
             {stats.total_links !== undefined && (

@@ -9,11 +9,17 @@ import re
 
 class ImageDownloader:
     """Download images and manage image files"""
-    
-    def __init__(self, timeout: int = 10, max_size_mb: int = 10):
+
+    def __init__(self, timeout: int = 10, max_size_mb: int = 10, cookies: dict = None, auth_headers: dict = None):
         self.timeout = timeout
         self.max_size_bytes = max_size_mb * 1024 * 1024
         self.session = requests.Session()
+
+        # Set up authentication
+        if cookies:
+            self.session.cookies.update(cookies)
+        if auth_headers:
+            self.session.headers.update(auth_headers)
     
     def sanitize_filename(self, url: str) -> str:
         """

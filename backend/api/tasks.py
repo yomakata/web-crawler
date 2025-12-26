@@ -266,10 +266,14 @@ def _crawl_content_mode(crawl_request, parser, response, writer, output_dir, bul
     
     # Download images if requested
     if crawl_request.download_images and image_urls:
-        downloader = ImageDownloader()
+        # Pass authentication to image downloader
+        downloader = ImageDownloader(
+            cookies=crawl_request.cookies,
+            auth_headers=crawl_request.auth_headers
+        )
         image_info = downloader.download_all_images(image_urls, output_path, crawl_request.url)
         image_mapping = image_info['mapping']
-        
+
         # Add downloaded images to output_files list
         for downloaded_filename in image_mapping.values():
             output_files.append(downloaded_filename)

@@ -1877,6 +1877,295 @@ The following major enhancements were added in December 2025:
 
 ---
 
+## Latest Updates (December 26, 2025 - Evening)
+
+### Individual Result ZIP Downloads & Image Authentication 📦🔐
+
+#### 1. **Individual URL Result ZIP Downloads**
+- **New Feature**: Each URL result can be downloaded as a complete ZIP package
+- **Location**:
+  - Backend: [routes.py:440-479](backend/api/routes.py#L440-L479)
+  - Frontend: [ResultsModal.jsx:114-126](frontend/src/components/ResultsModal.jsx#L114-L126)
+- **Endpoint**: `GET /api/download/<job_id>/<folder_name>/zip`
+- **Behavior**:
+  - Downloads entire result folder (content + images) as ZIP
+  - Files added to ZIP root (not in subfolder)
+  - Proper error handling for missing folders
+- **Use Cases**:
+  - Bulk crawl results - each URL gets its own "Download ZIP" button
+  - Ensures all related files (content + images) stay together
+  - Single-click download for complete result package
+
+**API Endpoint Details:**
+```python
+@api_bp.route('/download/<job_id>/<folder_name>/zip', methods=['GET'])
+def download_result_folder_zip(job_id, folder_name):
+    """Download a specific result folder as zip archive"""
+    # 1. Validate job exists
+    # 2. Find result folder by name
+    # 3. Create temporary ZIP file
+    # 4. Add all files from folder to ZIP (at root level)
+    # 5. Return ZIP as download
+```
+
+**Frontend Implementation:**
+```javascript
+// ResultsModal.jsx - Bulk crawl result download
+<button onClick={() => {
+  const folderName = result.output_folder.split(/[/\\]/).pop();
+  window.open(`http://localhost:5000/api/download/${jobId}/${folderName}/zip`, '_blank');
+}}>
+  Download ZIP
+</button>
+```
+
+#### 2. **Authentication for Image Downloads** 🔐
+- **Problem Fixed**: Images on authenticated domains were failing to download
+- **Root Cause**: Authentication credentials (cookies/headers) were used for HTML fetch but NOT passed to ImageDownloader
+- **Solution**: Modified ImageDownloader to accept and use authentication credentials
+- **Location**:
+  - ImageDownloader: [image_downloader.py:13-22](backend/crawler/image_downloader.py#L13-L22)
+  - Integration: [tasks.py:269-273](backend/api/tasks.py#L269-L273)
+
+**Changes Made:**
+
+**Before:**
+```python
+class ImageDownloader:
+    def __init__(self, timeout: int = 10, max_size_mb: int = 10):
+        self.session = requests.Session()
+```
+
+**After:**
+```python
+class ImageDownloader:
+    def __init__(self, timeout: int = 10, max_size_mb: int = 10,
+                 cookies: dict = None, auth_headers: dict = None):
+        self.session = requests.Session()
+
+        # Set up authentication
+        if cookies:
+            self.session.cookies.update(cookies)
+        if auth_headers:
+            self.session.headers.update(auth_headers)
+```
+
+**Integration in tasks.py:**
+```python
+# Download images if requested
+if crawl_request.download_images and image_urls:
+    # Pass authentication to image downloader
+    downloader = ImageDownloader(
+        cookies=crawl_request.cookies,
+        auth_headers=crawl_request.auth_headers
+    )
+    image_info = downloader.download_all_images(image_urls, output_path, crawl_request.url)
+```
+
+**Impact:**
+- Images from authenticated domains (like `image-intranet.dtgsiam.com`) now download successfully
+- Same authentication used for HTML is applied to image downloads
+- Fixes "0 images downloaded" issue for protected content
+
+#### 3. **Enhanced Image Status Display** 📊
+- **Improvement**: Frontend now shows successful vs failed image counts
+- **Location**: [ResultsModal.jsx:106-114, 371-394](frontend/src/components/ResultsModal.jsx#L106-L114)
+- **Features**:
+  - **Bulk Results**: Shows `🖼️ 2/3 images` or `⚠️ 3 images (failed)`
+  - **Single Results**:
+    - Image count card shows `0/1` or `2/3` format
+    - Color-coded: Green (success), Orange (failed), Gray (none)
+    - Status text: "Images Downloaded" vs "Images (Failed)"
+  - **Images Section**: Always shows `X/Y` format (successful/total)
+
+**UI Changes:**
+
+**Bulk Crawl Result Card:**
+```jsx
+{result.statistics.image_count > 0 && (
+  <span>
+    {result.metadata?.images?.successful > 0 ? (
+      `🖼️ ${result.metadata.images.successful}/${result.statistics.image_count} images`
+    ) : (
+      `⚠️ ${result.statistics.image_count} images (failed)`
+    )}
+  </span>
+)}
+```
+
+**Single Crawl Statistics Card:**
+```jsx
+<div className={`rounded-lg p-4 border ${
+  images.successfully_downloaded > 0
+    ? 'bg-success-50 border-success-200'
+    : images.total_found > 0
+    ? 'bg-warning-50 border-warning-200'
+    : 'bg-gray-50 border-gray-200'
+}`}>
+  <FiImage className={/* color based on status */} />
+  <p className="text-2xl font-bold text-gray-900">
+    {images.successfully_downloaded || 0}
+    {images.total_found > 0 && `/${images.total_found}`}
+  </p>
+  <p className="text-sm text-gray-600">
+    {images.successfully_downloaded > 0
+      ? 'Images Downloaded'
+      : images.total_found > 0
+      ? 'Images (Failed)'
+      : 'Images'}
+  </p>
+</div>
+```
+
+#### 4. **API Documentation Update** 📖
+- **Updated**: [routes.py:20-36](backend/api/routes.py#L20-L36)
+- **New Endpoints Documented**:
+  - `GET /api/download/<job_id>/<folder_name>/zip` - Download result folder as ZIP
+  - `GET /api/download/<job_id>` - Download all results as ZIP
+- **Endpoint Summary**:
+  ```
+  GET /api/download/{job_id}/{filename}        - Download individual file
+  GET /api/download/{job_id}/{folder_name}/zip - Download folder as ZIP (NEW)
+  GET /api/download/{job_id}                   - Download all job results as ZIP
+  ```
+
+### Technical Implementation Details
+
+#### ZIP Archive Creation Pattern
+```python
+# backend/api/routes.py
+import tempfile
+import zipfile
+
+temp_dir = Path(tempfile.gettempdir())
+zip_path = temp_dir / f'{folder_name}.zip'
+
+with zipfile.ZipFile(str(zip_path), 'w', zipfile.ZIP_DEFLATED) as zipf:
+    for file in target_folder.iterdir():
+        if file.is_file():
+            # Add files directly to root of zip (not in subfolder)
+            zipf.write(str(file), file.name)
+
+return send_file(
+    str(zip_path),
+    as_attachment=True,
+    download_name=f'{folder_name}.zip',
+    mimetype='application/zip'
+)
+```
+
+#### Authentication Flow for Images
+```
+1. User submits crawl with cookies/headers
+2. HTML fetched with authentication ✓
+3. Images extracted from HTML
+4. ImageDownloader created WITH same cookies/headers
+5. Each image downloaded with authentication ✓
+6. Images saved to output folder
+7. Image list added to output_files array
+8. ZIP includes both content and images
+```
+
+#### Frontend Download Logic
+```javascript
+// Extract folder name from output_folder path
+const folderName = result.output_folder.split(/[/\\]/).pop();
+
+// Call ZIP download endpoint
+window.open(`http://localhost:5000/api/download/${jobId}/${folderName}/zip`, '_blank');
+```
+
+### User Experience Improvements
+
+#### Before These Changes:
+**Problem 1 - Bulk Results Download:**
+- ❌ Error: "File not found" when downloading
+- ❌ Frontend was passing folder name instead of filename
+- ❌ Backend couldn't find file
+
+**Problem 2 - Image Downloads:**
+- ❌ Images from authenticated domains failed (0/1 downloaded)
+- ❌ ZIP was empty (no images included)
+- ❌ Misleading UI showed "1 images" but none downloaded
+
+#### After These Changes:
+**Solution 1 - Individual ZIP Downloads:**
+- ✅ Each URL result has "Download ZIP" button
+- ✅ ZIP contains ALL files (content + images)
+- ✅ One-click download for complete package
+- ✅ Works for both single and bulk crawl results
+
+**Solution 2 - Authenticated Image Downloads:**
+- ✅ Images download successfully with authentication
+- ✅ ZIP includes all downloaded images
+- ✅ Clear status display: "2/3 images" (2 succeeded, 1 failed)
+- ✅ Color-coded indicators (green=success, orange=failed)
+
+### Configuration & Deployment
+
+**No configuration changes required** - works out of the box with existing setup.
+
+**Backward Compatibility:**
+- ✅ Existing download endpoints unchanged
+- ✅ Old jobs/results still work
+- ✅ No database migration needed
+- ✅ Frontend gracefully handles missing data
+
+**Testing Checklist:**
+- [x] Individual URL ZIP download works
+- [x] ZIP contains all content files
+- [x] ZIP contains all successfully downloaded images
+- [x] Authentication passed to image downloads
+- [x] Images from authenticated domains download
+- [x] UI shows correct success/failed counts
+- [x] Color-coded image status cards
+- [x] Bulk crawl results show download buttons
+- [x] Single crawl results work correctly
+
+### File Structure in ZIP
+
+**Example ZIP Contents:**
+```
+7244_intranet_dtgo_com_Whats-New_20251226_1346.zip
+├── intranet_dtgo_com_Whats-New_20251226_1346.txt
+├── extraction_details.json
+├── extraction_summary.txt
+├── news-sep-23-2016.jpg          (if downloaded successfully)
+└── logo.png                       (if downloaded successfully)
+```
+
+**Note**: Files are at ZIP root level, not in a subfolder for convenience.
+
+### Related Endpoints
+
+**Download Endpoints Summary:**
+```python
+# Single file download (unchanged)
+GET /api/download/<job_id>/<filename>
+→ Returns: Single file (content.txt, content.md, etc.)
+
+# Individual folder ZIP (NEW)
+GET /api/download/<job_id>/<folder_name>/zip
+→ Returns: ZIP of all files in specific result folder
+
+# All job results ZIP (unchanged)
+GET /api/download/<job_id>
+→ Returns: ZIP of all folders and files for entire job
+```
+
+### Future Enhancement Ideas
+
+- [ ] Progress indicator for large ZIP creation
+- [ ] Selective file inclusion in ZIP (user picks files)
+- [ ] ZIP compression level configuration
+- [ ] Background ZIP creation for very large result sets
+- [ ] Email notification when ZIP is ready
+- [ ] Download queue for multiple concurrent ZIP requests
+- [ ] ZIP preview before download (file list)
+- [ ] Automatic cleanup of temporary ZIP files
+
+---
+
 ## Recent Improvements (December 26, 2025)
 
 ### Bulk Crawling Enhancements 🚀

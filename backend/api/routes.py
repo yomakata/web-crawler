@@ -28,6 +28,8 @@ def api_docs():
             'GET /api/job/<job_id>/results': 'Get job results',
             'GET /api/job/<job_id>/metadata': 'Get extraction metadata',
             'GET /api/download/<job_id>/<filename>': 'Download output file',
+            'GET /api/download/<job_id>/<folder_name>/zip': 'Download result folder as ZIP',
+            'GET /api/download/<job_id>': 'Download all results as ZIP',
             'GET /api/history': 'Get crawling history',
             'DELETE /api/job/<job_id>': 'Delete job and outputs'
         }
@@ -437,24 +439,66 @@ def serve_output_file(filepath):
 
 
 
+@api_bp.route('/download/<job_id>/<folder_name>/zip', methods=['GET'])
+def download_result_folder_zip(job_id, folder_name):
+    """Download a specific result folder as zip archive"""
+    job = job_store.get_job(job_id)
+
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+
+    # Find the result with matching folder name
+    target_folder = None
+    for result in job.results:
+        output_folder = result.get('output_folder')
+        if output_folder:
+            folder_path = Path(output_folder)
+            if folder_path.name == folder_name and folder_path.exists():
+                target_folder = folder_path
+                break
+
+    if not target_folder:
+        return jsonify({'error': 'Result folder not found'}), 404
+
+    # Create zip archive
+    import tempfile
+    import zipfile
+
+    temp_dir = Path(tempfile.gettempdir())
+    zip_path = temp_dir / f'{folder_name}.zip'
+
+    with zipfile.ZipFile(str(zip_path), 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for file in target_folder.iterdir():
+            if file.is_file():
+                # Add files directly to root of zip (not in subfolder)
+                zipf.write(str(file), file.name)
+
+    return send_file(
+        str(zip_path),
+        as_attachment=True,
+        download_name=f'{folder_name}.zip',
+        mimetype='application/zip'
+    )
+
+
 @api_bp.route('/download/<job_id>', methods=['GET'])
 def download_job_archive(job_id):
     """Download all job outputs as zip archive"""
     job = job_store.get_job(job_id)
-    
+
     if not job:
         return jsonify({'error': 'Job not found'}), 404
-    
+
     if not job.results:
         return jsonify({'error': 'No results to download'}), 404
-    
+
     # Create zip archive
     import tempfile
     import zipfile
-    
+
     temp_dir = Path(tempfile.gettempdir())
     zip_path = temp_dir / f'job_{job_id}.zip'
-    
+
     with zipfile.ZipFile(str(zip_path), 'w', zipfile.ZIP_DEFLATED) as zipf:
         for result in job.results:
             output_folder = result.get('output_folder')
@@ -464,7 +508,7 @@ def download_job_archive(job_id):
                     if file.is_file():
                         arcname = f"{folder_path.name}/{file.name}"
                         zipf.write(str(file), arcname)
-    
+
     return send_file(
         str(zip_path),
         as_attachment=True,
