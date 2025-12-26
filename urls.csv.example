@@ -1,0 +1,9 @@
+"""Example CSV file for bulk crawling"""
+# Save this as urls.csv
+
+url,mode,scope_class,format,download_images,link_type
+https://example.com,content,main-content,txt md,false,
+https://example.com/about,content,,txt,false,
+https://example.com,link,,,false,internal
+https://python.org,content,,txt md html,true,
+https://github.com,link,,,false,all
